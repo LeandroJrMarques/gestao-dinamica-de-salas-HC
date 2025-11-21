@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+sqlalchemy
+python-multipart
+
+# Drivers de banco de dados (SQLite vem embutido, Postgres opcional)
+psycopg2-binary
