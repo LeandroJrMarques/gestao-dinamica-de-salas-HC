@@ -16,6 +16,10 @@ class Sala(Base):
     
     status_atual = Column(String, default="LIVRE") 
 
+    # Colunas para auxiliar o acompanhamento em tempo real:
+    ocupante_atual = Column(String, nullable=True) # Nome do médico que está ocupando a sala
+    horario_entrada = Column(String, nullable=True) # Hora do check-in do ocupante
+
 class Grade(Base):
     __tablename__ = "grades"
 
