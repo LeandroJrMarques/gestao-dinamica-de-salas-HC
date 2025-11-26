@@ -186,7 +186,7 @@ onMounted(() => {
   <div class="min-h-screen bg-gray-50 font-sans text-gray-900 pb-20">
     
     <header class="bg-teal-600 text-white p-6 shadow-md rounded-b-3xl mb-8">
-      <h1 class="text-2xl font-bold">Portal do Médico</h1>
+      <h1 class="text-2xl font-bold">Portal do Profissional</h1>
       <p class="text-teal-100 text-sm">Realize Check-in e Check-out de consultórios</p>
     </header>
 
