@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 // FIX: Usando o modal específico do Gestor para evitar conflito com OccupancyDashboard
 import ManagerDetailsModal from './ManagerDetailsModal.vue'
 
@@ -32,6 +32,19 @@ const callApi = async (endpoint: string, method: string = 'POST') => {
     isLoading.value = false
   }
 }
+
+const fetchCurrentAllocation = async () => {
+  // Nota: Mudamos o método para GET aqui
+  const res = await callApi('/api/alocacao/resumo', 'GET')
+  
+  if (res && res.resumo_ambulatorios) {
+    allocationSummary.value = res.resumo_ambulatorios
+  }
+}
+
+onMounted(() => {
+  fetchCurrentAllocation()
+})
 
 const handleImportSalas = async () => {
   const res = await callApi('/api/setup/importar-salas')

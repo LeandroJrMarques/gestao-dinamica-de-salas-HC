@@ -178,3 +178,58 @@ def calcular_afinidade_tempo_real(sala: Sala, especialidade_medico: str, andar_a
                     score -= penalidade
 
     return round(score, 1)
+
+def obter_resumo_atual(db: Session):
+    """
+    Recupera a alocação atual do banco de dados e formata para o Dashboard.
+    Não altera dados, apenas lê.
+    """
+    # Busca todas as alocações com Join nas tabelas de Sala e Grade
+    alocacoes = db.query(Alocacao, Sala, Grade)\
+        .join(Sala, Alocacao.sala_id == Sala.id)\
+        .join(Grade, Alocacao.grade_id == Grade.id)\
+        .all()
+
+    if not alocacoes:
+        return {"resumo_ambulatorios": [], "alocacoes_detalhadas": []}
+
+    # Reconstrói a estrutura detalhada
+    resultado_detalhado = []
+    for aloc, sala, grade in alocacoes:
+        resultado_detalhado.append({
+            "medico": grade.nome_profissional,
+            "especialidade": grade.especialidade,
+            "sala": sala.nome_visual,
+            "sala_id": sala.id,
+            "bloco": sala.bloco,
+            "andar": sala.andar,
+            "dia": aloc.dia_semana,
+            "turno": aloc.turno
+        })
+
+    # Agrupamento (Lógica idêntica à de gerar_alocacao)
+    agrupamento = defaultdict(lambda: {"salas_unicas": set(), "locais": set()})
+
+    for item in resultado_detalhado:
+        esp = item['especialidade']
+        agrupamento[esp]['salas_unicas'].add(item['sala'])
+        local = f"Bloco {item['bloco']} - {item['andar']}"
+        agrupamento[esp]['locais'].add(local)
+
+    resumo_final = []
+    for especialidade, dados in agrupamento.items():
+        lista_salas = sorted(list(dados['salas_unicas']), key=natural_sort_key)
+        
+        resumo_final.append({
+            "ambulatorio": especialidade,
+            "total_salas": len(dados['salas_unicas']),
+            "localizacao": list(dados['locais']),
+            "lista_salas": lista_salas
+        })
+
+    resumo_final.sort(key=lambda x: x['total_salas'], reverse=True)
+
+    return {
+        "resumo_ambulatorios": resumo_final,
+        "alocacoes_detalhadas": resultado_detalhado
+    }
