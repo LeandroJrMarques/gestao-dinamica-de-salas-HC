@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import AllocationDetailsModal from '../components/AllocationDetailsModal.vue'
+// FIX: Usando o modal específico do Gestor para evitar conflito com OccupancyDashboard
+import ManagerDetailsModal from './ManagerDetailsModal.vue'
 
 interface ResumoAmbulatorio {
   ambulatorio: string;
@@ -81,7 +82,6 @@ const formatLocation = (loc: string) => {
       <p class="text-gray-500 mt-1">Gerenciamento de Importação e Alocação de Salas (GDS)</p>
     </header>
 
-    <!-- Barra de Ações -->
     <div class="mb-12 flex flex-wrap gap-4 rounded-xl bg-white p-6 shadow-sm border border-gray-100">
       <button 
         @click="handleImportSalas"
@@ -114,12 +114,10 @@ const formatLocation = (loc: string) => {
       </button>
     </div>
 
-    <!-- Resultados (Grid) -->
     <div v-if="allocationSummary.length > 0">
       <h2 class="text-xl font-semibold text-gray-800 mb-6">Resultado da Alocação por Especialidade</h2>
       
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <!-- Card -->
         <div 
           v-for="item in allocationSummary" 
           :key="item.ambulatorio"
@@ -144,7 +142,6 @@ const formatLocation = (loc: string) => {
               </ul>
             </div>
             
-            <!-- Ícone indicando ação de ver mais -->
             <div class="mt-4 flex justify-end pt-2 border-t border-gray-50">
               <span class="text-xs font-medium text-blue-600 group-hover:underline flex items-center gap-1">
                 Ver detalhes
@@ -156,7 +153,6 @@ const formatLocation = (loc: string) => {
       </div>
     </div>
 
-    <!-- Empty State -->
     <div v-else-if="!isLoading" class="mt-20 flex flex-col items-center justify-center text-center">
       <div class="rounded-full bg-gray-100 p-6 mb-4">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -165,8 +161,7 @@ const formatLocation = (loc: string) => {
       <p class="text-gray-500 max-w-md mt-2">Importe as salas e as grades médicas, depois clique em "Gerar Alocação" para visualizar o planejamento.</p>
     </div>
 
-    <!-- Modal de Detalhes -->
-    <AllocationDetailsModal 
+    <ManagerDetailsModal 
       :is-open="isDetailsModalOpen"
       :data="selectedAllocation"
       @close="closeDetails"
