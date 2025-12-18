@@ -28,6 +28,12 @@ const selectedAllocation = ref<ResumoAmbulatorio | null>(null)
 const API_URL = 'http://localhost:8000'
 let pollingInterval: number | null = null;
 
+// Normaliza strings para garantir agrupamento correto
+const normalize = (text: string | null | undefined) => {
+  if (!text) return "SALAS GERAIS / INDEFINIDO";
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+}
+
 const fetchDashboardRealTime = async () => {
   try {
     const res = await fetch(`${API_URL}/api/salas`)
@@ -37,17 +43,15 @@ const fetchDashboardRealTime = async () => {
     const agrupamento = new Map<string, ResumoAmbulatorio>()
 
     salas.forEach((sala: any) => {
-      // REGRA DE OURO DO MONITORAMENTO:
-      // Se ocupada, o "dono" do grupo é a especialidade do médico (especialidade_atual).
-      // Se livre, o "dono" é a especialidade original da sala (especialidade_preferencial).
+      // LÓGICA DE AGRUPAMENTO CORRIGIDA:
+      // O "Dono" do grupo é sempre a Especialidade Preferencial da sala.
+      // Isso garante que se a sala de OFTALMO estiver vazia, ela conta no total de OFTALMO.
+      // Se estiver ocupada por um Clínico, ela conta como OCUPADA no grupo de OFTALMO (invasão),
+      // ou podemos agrupar por quem está usando.
       
-      let chaveGrupo = "Salas Gerais";
-      
-      if (sala.status_atual === 'OCUPADA' && sala.especialidade_atual) {
-          chaveGrupo = sala.especialidade_atual.trim();
-      } else if (sala.especialidade_preferencial) {
-          chaveGrupo = sala.especialidade_preferencial.trim();
-      }
+      // Para consistência de "Capacidade vs Uso", o ideal é agrupar pelo DONO DA SALA.
+      // Assim, a barra de progresso mostra: "Das salas de Oftalmo, quantas estão em uso?"
+      const chaveGrupo = normalize(sala.especialidade_preferencial);
       
       if (!agrupamento.has(chaveGrupo)) {
         agrupamento.set(chaveGrupo, {
@@ -61,9 +65,13 @@ const fetchDashboardRealTime = async () => {
 
       const grupo = agrupamento.get(chaveGrupo)!
       
-      // Contabiliza
-      grupo.total_salas++
-      if (sala.status_atual === 'OCUPADA') grupo.salas_ocupadas++
+      // Contabiliza Capacidade (apenas se não estiver em manutenção)
+      if (!sala.is_maintenance) {
+          grupo.total_salas++;
+          if (sala.status_atual === 'OCUPADA') {
+              grupo.salas_ocupadas++;
+          }
+      }
 
       // Formata Local
       const loc = `Bloco ${sala.bloco} - ${sala.andar === '0' ? 'Térreo' : sala.andar + 'º'}`
@@ -80,8 +88,10 @@ const fetchDashboardRealTime = async () => {
       })
     })
 
-    // Ordena: Quem tem mais gente trabalhando aparece primeiro
-    dashboardData.value = Array.from(agrupamento.values()).sort((a, b) => b.salas_ocupadas - a.salas_ocupadas)
+    // Filtra grupos vazios (obras ou erros) e ordena por quem tem mais gente trabalhando
+    dashboardData.value = Array.from(agrupamento.values())
+        .filter(g => g.total_salas > 0)
+        .sort((a, b) => b.salas_ocupadas - a.salas_ocupadas)
     
     lastUpdate.value = new Date().toLocaleTimeString()
   } catch (e) {
@@ -102,6 +112,12 @@ const closeDetails = () => {
 const formatLocation = (locs: string[]) => {
   if (locs.length <= 2) return locs
   return [...locs.slice(0, 2), `+${locs.length - 2}`]
+}
+
+// Função helper para evitar NaN na template
+const getPercent = (ocupadas: number, total: number) => {
+    if (total === 0) return 0;
+    return Math.round((ocupadas / total) * 100);
 }
 
 onMounted(() => {
@@ -156,13 +172,18 @@ onUnmounted(() => {
             <div class="mt-auto pt-2">
               <div class="flex justify-between text-[10px] font-bold uppercase text-gray-400 mb-1">
                   <span>Ocupação</span>
-                  <span>{{ Math.round((item.salas_ocupadas / item.total_salas) * 100) }}%</span>
+                  <span>{{ getPercent(item.salas_ocupadas, item.total_salas) }}%</span>
               </div>
               <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
                   <div 
-                      class="h-1.5 rounded-full transition-all duration-500 bg-indigo-500"
-                      :style="{ width: `${(item.salas_ocupadas / item.total_salas) * 100}%` }"
+                      class="h-1.5 rounded-full transition-all duration-500"
+                      :class="getPercent(item.salas_ocupadas, item.total_salas) > 85 ? 'bg-red-500' : 'bg-indigo-500'"
+                      :style="{ width: `${getPercent(item.salas_ocupadas, item.total_salas)}%` }"
                   ></div>
+              </div>
+              <!-- Adicionado para clareza -->
+              <div class="text-[10px] text-gray-400 mt-1 text-right">
+                {{ item.total_salas }} salas totais
               </div>
             </div>
           </div>
@@ -170,7 +191,8 @@ onUnmounted(() => {
       </div>
       
       <div v-else class="text-center py-20 text-gray-500">
-        Carregando dados...
+        <span class="loading loading-spinner loading-lg text-indigo-500"></span>
+        <p class="mt-2 text-sm">Carregando dados do hospital...</p>
       </div>
     </main>
 
