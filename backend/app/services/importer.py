@@ -18,15 +18,17 @@ def get_file_path(filename):
     return None
 
 def normalize_text(text):
+    """Padroniza texto: SEM ACENTOS e UPPERCASE"""
     if not isinstance(text, str): return ""
     text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
     return text.upper().strip()
 
 # --- REGRAS DE MAPEAMENTO ---
 MAPPING_RULES = [
+    # Filtros
     ("TELEMEDICINA", "IGNORAR"), ("TELEENFERMAGEM", "IGNORAR"), ("TELEFONOAUDIOLOGIA", "IGNORAR"),
     ("TELENUTRICAO", "IGNORAR"), ("TELETERAPIA", "IGNORAR"), ("TELECONSULTA", "IGNORAR"),
-    ("NAVEGACAO", "IGNORAR"),
+    ("TELE-TRIAGEM", "IGNORAR"), ("NAVEGACAO", "IGNORAR"),
     
     # Especialidades
     ("BRONCOSCOPIA", "PNEUMOLOGIA"),
@@ -98,17 +100,19 @@ def map_specialty(specialty_raw):
     return "NAO MAPEADO"
 
 def extrair_bloco_e_andar(pavimento_raw):
-    # REGRA DE OURO: Só aceita se tiver BLOCO ou ANEXO escrito explicitamente
     raw = normalize_text(pavimento_raw)
     
+    # --- REGRA DE FERRO: SEM LOCAL, SEM SALA ---
+    # Se não tiver 'BLOCO' ou 'ANEXO', retorna None.
+    # Isso mata a linha de TOTAL imediatamente.
     bloco = None
     if "ANEXO" in raw: bloco = "ANEXO"
     elif "BLOCO F" in raw: bloco = "F"
     elif "BLOCO E" in raw: bloco = "E"
     elif "BLOCO C" in raw: bloco = "C"
     
-    # Se não identificou, retorna None. Isso mata a linha de TOTAL.
-    if bloco is None: return None, None
+    if bloco is None:
+        return None, None
 
     if "TERREO" in raw: andar = "0"
     else:
@@ -136,24 +140,24 @@ def importar_salas_csv():
         for _, row in df.iterrows():
             nome_raw = str(row.get('Nome do ambulatório', ''))
             pav_raw = str(row.get('Pavimento', ''))
-            qtd_raw = str(row.get('Número de salas existestes', '0'))
             
-            # --- FILTROS DE LIMPEZA ---
+            # 1. Filtro de Nome
             nome_clean = normalize_text(nome_raw)
-            # 1. Nome Vazio ou Total
             if not nome_clean or nome_clean == 'NAN' or "TOTAL" in nome_clean: continue
             
-            # 2. Pavimento Vazio
+            # 2. VALIDAÇÃO DE PAVIMENTO (CRUCIAL)
+            # Se pav_raw for NaN ou vazio, extrair_bloco retorna None
             if not pav_raw or normalize_text(pav_raw) == 'NAN': continue
             
-            # 3. Extração de Local (Mata a linha fantasma aqui se ela passou pelo nome)
             bloco, andar = extrair_bloco_e_andar(pav_raw)
+            
+            # SE NÃO ACHOU BLOCO VÁLIDO, PULA! (Aqui a linha fantasma morre)
             if bloco is None: continue 
 
-            # 4. Quantidade Absurda
+            # 3. Filtro de Quantidade
             try:
-                qtd = int(float(qtd_raw.replace(',', '.')))
-                if qtd > 60: continue # Nenhum setor tem mais de 60 salas
+                qtd = int(float(str(row.get('Número de salas existestes', '0')).replace(',', '.')))
+                if qtd > 60: continue 
             except: qtd = 0
 
             if qtd <= 0: continue
@@ -207,7 +211,7 @@ def importar_grades_csv():
     
     try: 
         df = pd.read_csv(path)
-        # Deduplicação apenas de linhas idênticas
+        # Remove duplicatas exatas
         df.drop_duplicates(inplace=True)
     except Exception as e: return {"erro": f"Erro ao ler CSV: {str(e)}"}
 

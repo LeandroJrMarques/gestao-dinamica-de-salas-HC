@@ -29,7 +29,7 @@ def identificar_clusters_preferenciais(grades, salas):
             cluster_map[esp] = melhor_loc
     return cluster_map
 
-def calcular_score(grade: Grade, sala: Sala, cluster_ideal: tuple = None) -> int:
+def calcular_score(grade: Grade, sala: Sala, cluster_ideal: tuple, historico_uso: set) -> int:
     if sala.is_maintenance: return -999999
     
     score = 0
@@ -40,21 +40,25 @@ def calcular_score(grade: Grade, sala: Sala, cluster_ideal: tuple = None) -> int
     if sala.features and isinstance(sala.features, list) and "RESTRICTED_SPECIALTY" in sala.features:
         is_restricted = True
     
-    # 1. NAO MAPEADO (Penalidade)
+    # 1. CONSISTÊNCIA DE SALA
+    if sala.id in historico_uso:
+        score += 50000 
+
+    # 2. NAO MAPEADO (Penalidade)
     if grade_esp == "NAO MAPEADO":
         if sala_esp == "NAO MAPEADO": return 50
         return -800 
     
-    # 2. SALA ESPECIALIZADA
+    # 3. SALA ESPECIALIZADA (Prioridade Máxima)
     if is_restricted:
-        if sala_esp == grade_esp: return 10000 
-        else: return -999999 
+        if sala_esp == grade_esp: return 20000 
+        else: return -999999 # Bloqueio: Oftalmo não entra em Ginecologia
             
-    # 3. MATCH DE NOME
+    # 4. MATCH DE NOME
     if sala_esp == grade_esp: score += 1000
     elif grade_esp in sala_esp: score += 800
     
-    # 4. CLUSTER
+    # 5. CLUSTER
     if cluster_ideal:
         bloco_ideal, andar_ideal = cluster_ideal
         if sala.bloco == bloco_ideal and str(sala.andar) == str(andar_ideal):
@@ -62,16 +66,17 @@ def calcular_score(grade: Grade, sala: Sala, cluster_ideal: tuple = None) -> int
         elif sala.bloco == bloco_ideal:
             score += 200
     
-    # 5. REGRAS FÍSICAS
+    # 6. REGRAS FÍSICAS
     if "ORTOPEDIA" in grade_esp:
-        if str(sala.andar) == "0": score += 3000
-        else: score -= 3000
+        if str(sala.andar) == "0": score += 2000
+        else: score -= 2000
     if "OFTALMO" in grade_esp and "OFTALMO" not in sala_esp:
         score -= 5000 
 
-    # 6. PENALIDADE DE INVASÃO
+    # 7. PENALIDADE DE INVASÃO
+    # Clínica Médica usando sala de outra especialidade
     if sala_esp != grade_esp and grade_esp not in sala_esp:
-        score -= 200
+        score -= 300 # Aumentei penalidade para evitar espalhamento
 
     return score
 
@@ -84,7 +89,6 @@ def gerar_alocacao_grade(db: Session):
     
     if not grades or not salas: return {"erro": "Sem dados"}
     
-    # CONTAGEM RIGOROSA DE SALAS FÍSICAS
     TOTAL_SALAS_FISICAS = len(salas)
 
     cluster_map = identificar_clusters_preferenciais(grades, salas)
@@ -94,17 +98,25 @@ def gerar_alocacao_grade(db: Session):
         for d in ["SEG", "TER", "QUA", "QUI", "SEX"]
     }
     
+    historico_alocacao = defaultdict(set)
+    
     resultado_detalhado = []
     conflitos = []
 
     def sort_priority(g):
         prio = 50
         if g.especialidade == "NAO MAPEADO": prio = 100
-        elif "ORTOPEDIA" in g.especialidade: prio = 0
+        
+        # Restrições Físicas Fortes furam a fila
+        if "ORTOPEDIA" in g.especialidade: prio = 0
         elif "OFTALMO" in g.especialidade: prio = 1
         elif "GINECOLOGIA" in g.especialidade: prio = 2
-        elif g.especialidade in cluster_map: prio = 10
+        
+        # Quem tem sala própria especializada
+        elif g.especialidade in cluster_map: prio = 10 
+        
         elif g.nome_profissional.startswith("Dr"): prio = 20
+        
         return prio
 
     grades_ordenadas = sorted(grades, key=sort_priority)
@@ -113,25 +125,26 @@ def gerar_alocacao_grade(db: Session):
         dia = item_grade.dia_semana
         turno = item_grade.turno
         
-        # --- TRAVA DE CAPACIDADE FÍSICA ---
+        # Trava de Capacidade
         if dia in ocupacao and turno in ocupacao[dia]:
             if len(ocupacao[dia][turno]) >= TOTAL_SALAS_FISICAS:
                 conflitos.append({
                     "medico": item_grade.nome_profissional,
                     "especialidade": item_grade.especialidade,
-                    "motivo": f"Lotação Máxima Atingida ({TOTAL_SALAS_FISICAS} salas)"
+                    "motivo": "Lotação Máxima"
                 })
                 continue
 
         melhor_sala = None
         melhor_score = -float('inf')
         cluster_alvo = cluster_map.get(item_grade.especialidade)
+        historico_uso_esp = historico_alocacao[item_grade.especialidade]
         
         for sala in salas:
             if dia not in ocupacao: continue
             if sala.id in ocupacao[dia][turno]: continue
                 
-            score = calcular_score(item_grade, sala, cluster_alvo)
+            score = calcular_score(item_grade, sala, cluster_alvo, historico_uso_esp)
             
             if score > melhor_score:
                 melhor_score = score
@@ -151,7 +164,9 @@ def gerar_alocacao_grade(db: Session):
                 score=melhor_score
             )
             db.add(nova_alocacao)
+            
             ocupacao[item_grade.dia_semana][item_grade.turno].add(melhor_sala.id)
+            historico_alocacao[item_grade.especialidade].add(melhor_sala.id)
             
             resultado_detalhado.append({
                 "medico": item_grade.nome_profissional,
@@ -167,7 +182,7 @@ def gerar_alocacao_grade(db: Session):
             conflitos.append({
                 "medico": item_grade.nome_profissional,
                 "especialidade": item_grade.especialidade,
-                "motivo": f"Sem sala compatível (Score: {melhor_score})"
+                "motivo": f"Sem sala (Score: {melhor_score})"
             })
             
     db.commit()
@@ -175,7 +190,6 @@ def gerar_alocacao_grade(db: Session):
     return construir_resumo_json(resultado_detalhado, conflitos)
 
 def construir_resumo_json(detalhes, conflitos):
-    """Função compartilhada para gerar o JSON do Dashboard."""
     agrupamento = defaultdict(lambda: {"salas_unicas": set(), "locais": set(), "qtd_profissionais": 0})
     
     for item in detalhes:
@@ -202,8 +216,8 @@ def construir_resumo_json(detalhes, conflitos):
         "status": "Processamento concluído",
         "total_alocados_semana": len(detalhes),
         "total_conflitos": len(conflitos),
-        "resumo_ambulatorios": resumo_final, # Campo esperado pelo frontend
-        "resumo_executivo": resumo_final,    # Compatibilidade com versão antiga
+        "resumo_ambulatorios": resumo_final,
+        "resumo_executivo": resumo_final,
         "alocacoes_detalhadas": detalhes,
         "conflitos": conflitos
     }
@@ -228,10 +242,6 @@ def calcular_afinidade_tempo_real(sala: Sala, especialidade_medico: str, andar_a
     return round(score, 1)
 
 def obter_resumo_atual(db: Session):
-    """
-    Reconstrói o JSON completo a partir do Banco de Dados.
-    Essencial para persistência (F5).
-    """
     alocacoes = db.query(Alocacao, Sala, Grade).join(Sala).join(Grade).all()
     
     if not alocacoes:
@@ -250,5 +260,4 @@ def obter_resumo_atual(db: Session):
             "score": aloc.score
         })
     
-    # Reutiliza a lógica de construção para garantir formato idêntico
     return construir_resumo_json(resultado_detalhado, [])
